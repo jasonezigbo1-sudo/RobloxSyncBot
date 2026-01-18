@@ -1,27 +1,22 @@
 {
   "name": "robloxsyncbot",
   "version": "1.0.0",
-  "description": "Discord bot with Roblox commands",
+  "description": "Discord bot for Roblox Admin Sync",
   "main": "Bot.js",
   "scripts": {
     "start": "node Bot.js"
   },
   "dependencies": {
     "axios": "^1.13.2",
-    "crypto-js": "^4.2.0",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3",
-    "mongoose": "^9.1.4"
+    "mongoose": "^8.0.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "cookie-session": "^2.0.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/jasonezigbo1/jasonezigbo1-sudo.git"
+  "engines": {
+    "node": "18"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/jasonezigbo1/jasonezigbo1-sudo/issues"
-  },
-  "homepage": "https://github.com/jasonezigbo1/jasonezigbo1-sudo#readme"
+  "license": "ISC"
 }
