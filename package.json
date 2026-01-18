@@ -10,5 +10,16 @@
     "axios": "^1.13.2",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasonezigbo1/jasonezigbo1-sudo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jasonezigbo1/jasonezigbo1-sudo/issues"
+  },
+  "homepage": "https://github.com/jasonezigbo1/jasonezigbo1-sudo#readme"
 }

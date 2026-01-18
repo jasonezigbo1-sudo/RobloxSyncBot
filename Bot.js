@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const axios = require('axios');
-const Server = require('./models/Server');
-const { decrypt } = require('./utils/crypto');
+const Server = require('./server/models/Server'); // ✅ FIXED
+const { decrypt } = require('./server/utils/crypto'); // ✅ FIXED
 
 // Commands Definition
 const commands = [
@@ -130,7 +130,7 @@ const startBot = async () => {
                 successMsg = `✅ **Banned** User \`${userId}\`\n**Reason:** ${reason}`;
             } else if (commandName === 'robloxkick') {
                 payload = { action: 'kick', userId, reason, moderator };
-                successMsg = `bw **Kicked** User \`${userId}\`\n**Reason:** ${reason}`;
+                successMsg = `⚽ **Kicked** User \`${userId}\`\n**Reason:** ${reason}`;
             } else if (commandName === 'robloxunban') {
                 payload = { action: 'unban', userId, moderator };
                 successMsg = `🔓 **Unbanned** User \`${userId}\``;
