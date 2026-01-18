@@ -2,9 +2,10 @@
   "name": "robloxsyncbot",
   "version": "1.0.0",
   "description": "Discord bot for Roblox Admin Sync",
-  "main": "Bot.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node Bot.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "dependencies": {
     "axios": "^1.13.2",
@@ -20,3 +21,15 @@
   },
   "license": "ISC"
 }
+```
+
+## Step 3: Set Environment Variables on Render
+
+1. Go to your Render dashboard
+2. Select your service
+3. Go to **Environment** tab
+4. Add these variables:
+```
+DISCORD_BOT_TOKEN=your_discord_bot_token_here
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/robloxsync
+ENCRYPTION_KEY=your_32_character_secret_key_here
