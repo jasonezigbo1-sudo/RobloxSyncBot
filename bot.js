@@ -1,72 +1,3 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
-const axios = require('axios');
-// FIX: Remove 'server/' prefix from paths
-const Server = require('./models/Server');
-const { decrypt } = require('./utils/crypto');
-
-// Commands Definition
-const commands = [
-    new SlashCommandBuilder()
-        .setName('robloxban')
-        .setDescription('Ban a user from the Roblox game')
-        .addStringOption(option => 
-            option.setName('userid').setDescription('Roblox User ID').setRequired(true))
-        .addStringOption(option => 
-            option.setName('reason').setDescription('Reason for the ban').setRequired(false)),
-    
-    new SlashCommandBuilder()
-        .setName('robloxkick')
-        .setDescription('Kick a user from the current server')
-        .addStringOption(option => 
-            option.setName('userid').setDescription('Roblox User ID').setRequired(true))
-        .addStringOption(option => 
-            option.setName('reason').setDescription('Reason for the kick').setRequired(false)),
-
-    new SlashCommandBuilder()
-        .setName('robloxunban')
-        .setDescription('Unban a user from the Roblox game')
-        .addStringOption(option => 
-            option.setName('userid').setDescription('Roblox User ID').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('robloxannounce')
-        .setDescription('Send a global announcement to all servers')
-        .addStringOption(option => 
-            option.setName('message').setDescription('Message to broadcast').setRequired(true))
-]
-.map(command => command.toJSON());
-
-async function publishToRoblox(universeId, apiKey, payload) {
-    const url = `https://apis.roblox.com/messaging-service/v1/universes/${universeId}/topics/DiscordBanCommand`;
-    
-    try {
-        console.log(`📤 Publishing to Roblox Universe ${universeId}:`, payload);
-        
-        await axios.post(url, {
-            message: JSON.stringify(payload)
-        }, {
-            headers: {
-                'x-api-key': apiKey,
-                'Content-Type': 'application/json'
-            },
-            timeout: 10000 // 10 second timeout
-        });
-        
-        console.log('✅ Successfully published to Roblox');
-        return { success: true };
-    } catch (error) {
-        console.error("❌ Roblox API Error:", error.response?.data || error.message);
-        
-        // More detailed error messages
-        if (error.response) {
-            console.error("Response status:", error.response.status);
-            console.error("Response data:", error.response.data);
-        }
-        
-        throw new Error(error.response?.data?.message || error.message);
-    }
-}
-
 const startBot = async () => {
     const token = process.env.DISCORD_BOT_TOKEN;
     
@@ -79,7 +10,8 @@ const startBot = async () => {
     console.log('  - Token exists:', !!token);
     console.log('  - Token length:', token ? token.length : 0);
     console.log('  - Token preview:', token ? token.substring(0, 10) + '...' : 'N/A');
-    console.log('  - Token format valid:', token ? /^[\w-]{59,}\.[\w-]{6,}\.[\w-]{27,}$/.test(token) : false);
+    // FIXED: More lenient token validation - just check it has 3 parts
+    console.log('  - Token format valid:', token ? token.split('.').length === 3 : false);
     
     if (!token || token === 'YOUR_BOT_TOKEN_HERE' || token.length < 50) {
         console.error("\n❌ CRITICAL: Invalid or missing Discord Bot Token");
@@ -97,14 +29,9 @@ const startBot = async () => {
     const client = new Client({ 
         intents: [
             GatewayIntentBits.Guilds,
-            GatewayIntentBits.GuildMessages
-        ],
-        // Add these options for better debugging
-        ws: {
-            properties: {
-                browser: 'Discord Client'
-            }
-        }
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.GuildMembers  // ADDED: This is required!
+        ]
     });
 
     // Comprehensive error handling
@@ -112,6 +39,7 @@ const startBot = async () => {
         console.error('\n❌ DISCORD CLIENT ERROR:');
         console.error('Error name:', error.name);
         console.error('Error message:', error.message);
+        console.error('Error code:', error.code);
         console.error('Stack trace:', error.stack);
         console.error('');
     });
@@ -121,26 +49,14 @@ const startBot = async () => {
     });
 
     client.on('debug', info => {
-        // Filter and log important debug messages
-        const importantPatterns = [
-            'Preparing to connect',
-            'Session',
-            'Ready',
-            'Heartbeat',
-            'Identified',
-            'READY',
-            'gateway',
-            'Shard'
-        ];
-        
-        if (importantPatterns.some(pattern => info.toLowerCase().includes(pattern.toLowerCase()))) {
-            console.log('🔧 Debug:', info);
-        }
+        // Log ALL debug messages for troubleshooting
+        console.log('🔧 Debug:', info);
     });
 
     client.on('shardError', error => {
         console.error('\n❌ WEBSOCKET SHARD ERROR:');
         console.error('Error:', error);
+        console.error('Error code:', error.code);
         console.error('');
     });
 
@@ -170,7 +86,7 @@ const startBot = async () => {
         
         if (client.guilds.cache.size === 0) {
             console.warn('\n⚠️ WARNING: Bot is not in any Discord servers!');
-            console.warn('⚠️ Invite your bot using this URL format:');
+            console.warn('⚠️ Invite your bot using this URL:');
             console.warn(`⚠️ https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&permissions=8&scope=bot%20applications.commands`);
         } else {
             console.log('\nServers:');
@@ -321,32 +237,10 @@ const startBot = async () => {
     console.log('🔄 Attempting to login to Discord...');
     console.log('   This may take 10-30 seconds...\n');
     
-    // Add connection timeout with more details
-    const timeoutWarning = setTimeout(() => {
-        console.warn('\n========================================');
-        console.warn('⚠️ CONNECTION TIMEOUT WARNING');
-        console.warn('========================================');
-        console.warn('Still waiting for Discord connection after 30 seconds');
-        console.warn('\nPossible issues:');
-        console.warn('  1. Invalid bot token - Check Discord Developer Portal');
-        console.warn('  2. Bot token was recently reset');
-        console.warn('  3. Network connectivity issue from Render');
-        console.warn('  4. Discord API is experiencing issues');
-        console.warn('  5. Bot intents not properly configured');
-        console.warn('\nTroubleshooting steps:');
-        console.warn('  1. Verify token in Render Environment Variables');
-        console.warn('  2. Check Discord Developer Portal for bot status');
-        console.warn('  3. Ensure bot has required intents enabled');
-        console.warn('  4. Check Discord API status: https://discordstatus.com');
-        console.warn('========================================\n');
-    }, 30000);
-
     try {
         await client.login(token);
-        clearTimeout(timeoutWarning);
         console.log('✅ Login method called successfully (waiting for READY event)');
     } catch (err) {
-        clearTimeout(timeoutWarning);
         console.error('\n========================================');
         console.error('❌ FATAL: BOT LOGIN FAILED');
         console.error('========================================');
@@ -362,5 +256,3 @@ const startBot = async () => {
         throw err;
     }
 };
-
-module.exports = { startBot };
