@@ -61,7 +61,7 @@ const startBot = async () => {
     console.log('🔍 Bot Token Check:');
     console.log('- Token exists:', !!token);
     console.log('- Token length:', token ? token.length : 0);
-    console.log('- Token valid:', token && token !== 'YOUR_BOT_TOKEN_HERE' && token.length > 20);
+    console.log('- Token starts with:', token ? token.substring(0, 10) + '...' : 'N/A');
     
     if (!token || token === 'YOUR_BOT_TOKEN_HERE' || token.length < 20) {
         console.error("❌ Discord Bot Token not configured. Bot will not start.");
@@ -70,10 +70,36 @@ const startBot = async () => {
     }
 
     console.log('✅ Bot token validated, creating Discord client...');
-    const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+    const client = new Client({ 
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMembers
+        ] 
+    });
+
+    // Add error event handlers BEFORE login
+    client.on('error', error => {
+        console.error('❌ Discord Client Error:', error);
+    });
+
+    client.on('warn', info => {
+        console.warn('⚠️ Discord Client Warning:', info);
+    });
+
+    client.on('debug', info => {
+        // Only log important debug messages
+        if (info.includes('Preparing to connect') || info.includes('Session') || info.includes('Ready')) {
+            console.log('🔧 Debug:', info);
+        }
+    });
+
+    client.on('shardError', error => {
+        console.error('❌ Shard Error:', error);
+    });
 
     client.once('ready', async () => {
         console.log(`🤖 Bot logged in as ${client.user.tag}`);
+        console.log(`📊 Connected to ${client.guilds.cache.size} server(s)`);
 
         // Register Commands
         const rest = new REST({ version: '10' }).setToken(token);
@@ -161,8 +187,10 @@ const startBot = async () => {
     console.log('🔄 Attempting to login to Discord...');
     try {
         await client.login(token);
+        console.log('✅ Login method completed (waiting for ready event)');
     } catch (err) {
-        console.error("❌ Failed to login bot:", err.message);
+        console.error("❌ Failed to login bot:", err);
+        console.error("❌ Full error:", err.stack);
         throw err;
     }
 };
