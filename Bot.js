@@ -72,8 +72,8 @@ const startBot = async () => {
     console.log('✅ Bot token validated, creating Discord client...');
     const client = new Client({ 
         intents: [
-            GatewayIntentBits.Guilds,
-            GatewayIntentBits.GuildMembers
+            GatewayIntentBits.Guilds
+            // Simplified - only using Guilds intent
         ] 
     });
 
@@ -88,13 +88,21 @@ const startBot = async () => {
 
     client.on('debug', info => {
         // Only log important debug messages
-        if (info.includes('Preparing to connect') || info.includes('Session') || info.includes('Ready')) {
+        if (info.includes('Preparing to connect') || 
+            info.includes('Session') || 
+            info.includes('Ready') ||
+            info.includes('Heartbeat') ||
+            info.includes('Identified')) {
             console.log('🔧 Debug:', info);
         }
     });
 
     client.on('shardError', error => {
         console.error('❌ Shard Error:', error);
+    });
+
+    client.on('shardReady', (id) => {
+        console.log(`✅ Shard ${id} is ready!`);
     });
 
     client.once('ready', async () => {
@@ -185,11 +193,26 @@ const startBot = async () => {
     });
 
     console.log('🔄 Attempting to login to Discord...');
+    
+    // Add timeout warning
+    const timeoutWarning = setTimeout(() => {
+        console.warn('⚠️ Still waiting for Discord connection after 30 seconds...');
+        console.warn('⚠️ Possible issues:');
+        console.warn('   1. Invalid bot token');
+        console.warn('   2. Bot not invited to any Discord server');
+        console.warn('   3. Network connectivity issue from Render');
+        console.warn('   4. Discord API is down');
+    }, 30000);
+
     try {
         await client.login(token);
+        clearTimeout(timeoutWarning);
         console.log('✅ Login method completed (waiting for ready event)');
     } catch (err) {
+        clearTimeout(timeoutWarning);
         console.error("❌ Failed to login bot:", err);
+        console.error("❌ Error code:", err.code);
+        console.error("❌ Error message:", err.message);
         console.error("❌ Full error:", err.stack);
         throw err;
     }
