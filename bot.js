@@ -1,7 +1,73 @@
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const axios = require('axios');
+const Server = require('./models/Server');
+const { decrypt } = require('./utils/crypto');
+
+// Commands Definition
+const commands = [
+    new SlashCommandBuilder()
+        .setName('robloxban')
+        .setDescription('Ban a user from the Roblox game')
+        .addStringOption(option => 
+            option.setName('userid').setDescription('Roblox User ID').setRequired(true))
+        .addStringOption(option => 
+            option.setName('reason').setDescription('Reason for the ban').setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('robloxkick')
+        .setDescription('Kick a user from the current server')
+        .addStringOption(option => 
+            option.setName('userid').setDescription('Roblox User ID').setRequired(true))
+        .addStringOption(option => 
+            option.setName('reason').setDescription('Reason for the kick').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('robloxunban')
+        .setDescription('Unban a user from the Roblox game')
+        .addStringOption(option => 
+            option.setName('userid').setDescription('Roblox User ID').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('robloxannounce')
+        .setDescription('Send a global announcement to all servers')
+        .addStringOption(option => 
+            option.setName('message').setDescription('Message to broadcast').setRequired(true))
+]
+.map(command => command.toJSON());
+
+async function publishToRoblox(universeId, apiKey, payload) {
+    const url = `https://apis.roblox.com/messaging-service/v1/universes/${universeId}/topics/DiscordBanCommand`;
+    
+    try {
+        console.log(`📤 Publishing to Roblox Universe ${universeId}:`, payload);
+        
+        await axios.post(url, {
+            message: JSON.stringify(payload)
+        }, {
+            headers: {
+                'x-api-key': apiKey,
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000
+        });
+        
+        console.log('✅ Successfully published to Roblox');
+        return { success: true };
+    } catch (error) {
+        console.error("❌ Roblox API Error:", error.response?.data || error.message);
+        
+        if (error.response) {
+            console.error("Response status:", error.response.status);
+            console.error("Response data:", error.response.data);
+        }
+        
+        throw new Error(error.response?.data?.message || error.message);
+    }
+}
+
 const startBot = async () => {
     const token = process.env.DISCORD_BOT_TOKEN;
     
-    // Enhanced debug logging
     console.log('\n========================================');
     console.log('🔍 DISCORD BOT INITIALIZATION DEBUG');
     console.log('========================================');
@@ -10,7 +76,6 @@ const startBot = async () => {
     console.log('  - Token exists:', !!token);
     console.log('  - Token length:', token ? token.length : 0);
     console.log('  - Token preview:', token ? token.substring(0, 10) + '...' : 'N/A');
-    // FIXED: More lenient token validation - just check it has 3 parts
     console.log('  - Token format valid:', token ? token.split('.').length === 3 : false);
     
     if (!token || token === 'YOUR_BOT_TOKEN_HERE' || token.length < 50) {
@@ -30,11 +95,10 @@ const startBot = async () => {
         intents: [
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages,
-            GatewayIntentBits.GuildMembers  // ADDED: This is required!
+            GatewayIntentBits.GuildMembers
         ]
     });
 
-    // Comprehensive error handling
     client.on('error', error => {
         console.error('\n❌ DISCORD CLIENT ERROR:');
         console.error('Error name:', error.name);
@@ -49,7 +113,6 @@ const startBot = async () => {
     });
 
     client.on('debug', info => {
-        // Log ALL debug messages for troubleshooting
         console.log('🔧 Debug:', info);
     });
 
@@ -96,7 +159,6 @@ const startBot = async () => {
         }
         console.log('========================================\n');
 
-        // Register Commands
         const rest = new REST({ version: '10' }).setToken(token);
         try {
             console.log('🔄 Registering slash commands...');
@@ -128,14 +190,13 @@ const startBot = async () => {
         await interaction.deferReply();
 
         try {
-            // 1. Fetch Server Config
             console.log(`🔍 Fetching config for guild: ${interaction.guildId}`);
             const config = await Server.findOne({ discordGuildId: interaction.guildId });
 
             if (!config || !config.robloxApiKey || !config.robloxUniverseId) {
                 console.warn('⚠️ Server not configured');
                 return interaction.editReply({ 
-                    content: '❌ **Setup Required:** This server is not connected to RobloxSync. Please configure it in the dashboard at your Render URL.' 
+                    content: '❌ **Setup Required:** This server is not connected to RobloxSync. Please configure it in the dashboard.' 
                 });
             }
 
@@ -143,7 +204,6 @@ const startBot = async () => {
             console.log(`   Universe ID: ${config.robloxUniverseId}`);
             console.log(`   Admin Role: ${config.adminRoleId || 'None set'}`);
 
-            // 2. Check Permissions (Admin Role)
             if (config.adminRoleId) {
                 const hasRole = interaction.member.roles.cache.has(config.adminRoleId);
                 const isAdmin = interaction.member.permissions.has('Administrator');
@@ -155,25 +215,23 @@ const startBot = async () => {
                 if (!hasRole && !isAdmin) {
                     console.warn('⛔ Permission denied');
                     return interaction.editReply({ 
-                        content: `⛔ **Permission Denied:** You need the <@&${config.adminRoleId}> role or Administrator permission to use this command.` 
+                        content: `⛔ **Permission Denied:** You need the <@&${config.adminRoleId}> role or Administrator permission.` 
                     });
                 }
             }
 
             console.log('✅ Permission check passed');
 
-            // 3. Decrypt API Key
             const apiKey = decrypt(config.robloxApiKey);
             if (!apiKey) {
                 console.error('❌ API Key decryption failed');
                 return interaction.editReply({ 
-                    content: '❌ **Error:** API Key decryption failed. Please update your settings in the dashboard.' 
+                    content: '❌ **Error:** API Key decryption failed. Please update settings in dashboard.' 
                 });
             }
 
             console.log('✅ API Key decrypted successfully');
 
-            // 4. Prepare Command Data
             const commandName = interaction.commandName;
             const userId = interaction.options.getString('userid');
             const reason = interaction.options.getString('reason') || 'No reason provided';
@@ -183,7 +241,6 @@ const startBot = async () => {
             let payload = {};
             let successMsg = '';
 
-            // 5. Construct Payload based on command
             switch (commandName) {
                 case 'robloxban':
                     payload = { action: 'ban', userId, reason, moderator };
@@ -210,11 +267,9 @@ const startBot = async () => {
                     return interaction.editReply({ content: '❌ Unknown command' });
             }
 
-            // 6. Send to Roblox
             console.log('📤 Sending command to Roblox...');
             await publishToRoblox(config.robloxUniverseId, apiKey, payload);
 
-            // 7. Log Success
             console.log('✅ Command executed successfully\n');
             await interaction.editReply({ content: successMsg });
 
@@ -227,15 +282,14 @@ const startBot = async () => {
             console.error('');
             
             await interaction.editReply({ 
-                content: `❌ **Error:** ${error.message}\n\nPlease check the bot logs or contact an administrator.` 
+                content: `❌ **Error:** ${error.message}` 
             }).catch(err => {
                 console.error('Failed to send error message:', err);
             });
         }
     });
 
-    console.log('🔄 Attempting to login to Discord...');
-    console.log('   This may take 10-30 seconds...\n');
+    console.log('🔄 Attempting to login to Discord...\n');
     
     try {
         await client.login(token);
@@ -247,12 +301,9 @@ const startBot = async () => {
         console.error('Error code:', err.code);
         console.error('Error message:', err.message);
         console.error('Full error:', err.stack);
-        console.error('\nCommon causes:');
-        console.error('  - Invalid token format');
-        console.error('  - Token has been reset/regenerated');
-        console.error('  - Bot application has been deleted');
-        console.error('  - Network/firewall blocking Discord');
         console.error('========================================\n');
         throw err;
     }
 };
+
+module.exports = { startBot };
