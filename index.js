@@ -1,278 +1,309 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const cookieSession = require('cookie-session');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const axios = require('axios');
-const connectDB = require('./lib/mongodb');
-const User = require('./models/User');
 const Server = require('./models/Server');
-const { encrypt, decrypt } = require('./utils/crypto');
-const { startBot } = require('./bot'); // Import Bot Logic
+const { decrypt } = require('./utils/crypto');
 
-const app = express();
+// Commands Definition
+const commands = [
+    new SlashCommandBuilder()
+        .setName('robloxban')
+        .setDescription('Ban a user from the Roblox game')
+        .addStringOption(option => 
+            option.setName('userid').setDescription('Roblox User ID').setRequired(true))
+        .addStringOption(option => 
+            option.setName('reason').setDescription('Reason for the ban').setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('robloxkick')
+        .setDescription('Kick a user from the current server')
+        .addStringOption(option => 
+            option.setName('userid').setDescription('Roblox User ID').setRequired(true))
+        .addStringOption(option => 
+            option.setName('reason').setDescription('Reason for the kick').setRequired(false)),
 
-// Trust Vercel Proxy
-app.set('trust proxy', 1);
+    new SlashCommandBuilder()
+        .setName('robloxunban')
+        .setDescription('Unban a user from the Roblox game')
+        .addStringOption(option => 
+            option.setName('userid').setDescription('Roblox User ID').setRequired(true)),
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL || true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}));
+    new SlashCommandBuilder()
+        .setName('robloxannounce')
+        .setDescription('Send a global announcement to all servers')
+        .addStringOption(option => 
+            option.setName('message').setDescription('Message to broadcast').setRequired(true))
+]
+.map(command => command.toJSON());
 
-app.use(express.json());
-app.use(cookieSession({
-    name: 'robloxsync_session',
-    keys: [process.env.SESSION_SECRET || 'secret'],
-    maxAge: 24 * 60 * 60 * 1000,
-    secure: true, 
-    sameSite: 'lax',
-    httpOnly: true
-}));
-
-const withDB = (handler) => async (req, res, next) => {
+async function publishToRoblox(universeId, apiKey, payload) {
+    const url = `https://apis.roblox.com/messaging-service/v1/universes/${universeId}/topics/DiscordBanCommand`;
+    
     try {
-        await connectDB();
-        return handler(req, res, next);
+        console.log(`📤 Publishing to Roblox Universe ${universeId}:`, payload);
+        
+        await axios.post(url, {
+            message: JSON.stringify(payload)
+        }, {
+            headers: {
+                'x-api-key': apiKey,
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000
+        });
+        
+        console.log('✅ Successfully published to Roblox');
+        return { success: true };
     } catch (error) {
-        console.error("Database connection error:", error);
-        res.status(500).json({ error: "Database connection failed: " + error.message });
+        console.error("❌ Roblox API Error:", error.response?.data || error.message);
+        
+        if (error.response) {
+            console.error("Response status:", error.response.status);
+            console.error("Response data:", error.response.data);
+        }
+        
+        throw new Error(error.response?.data?.message || error.message);
+    }
+}
+
+const startBot = async () => {
+    const token = process.env.DISCORD_BOT_TOKEN;
+    
+    console.log('\n========================================');
+    console.log('🔍 DISCORD BOT INITIALIZATION DEBUG');
+    console.log('========================================');
+    console.log('Environment:', process.env.NODE_ENV || 'development');
+    console.log('Bot Token Check:');
+    console.log('  - Token exists:', !!token);
+    console.log('  - Token length:', token ? token.length : 0);
+    console.log('  - Token preview:', token ? token.substring(0, 10) + '...' : 'N/A');
+    console.log('  - Token format valid:', token ? token.split('.').length === 3 : false);
+    
+    if (!token || token === 'YOUR_BOT_TOKEN_HERE' || token.length < 50) {
+        console.error("\n❌ CRITICAL: Invalid or missing Discord Bot Token");
+        console.error("❌ Token must be at least 50 characters");
+        console.error("❌ Please set DISCORD_BOT_TOKEN in your environment variables");
+        console.error("❌ Get your token from: https://discord.com/developers/applications");
+        console.error('========================================\n');
+        return;
+    }
+
+    console.log('✅ Bot token validated');
+    console.log('========================================\n');
+    
+    console.log('🔧 Creating Discord client with intents...');
+    const client = new Client({ 
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.GuildMembers
+        ]
+    });
+
+    client.on('error', error => {
+        console.error('\n❌ DISCORD CLIENT ERROR:');
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error code:', error.code);
+        console.error('Stack trace:', error.stack);
+        console.error('');
+    });
+
+    client.on('warn', info => {
+        console.warn('⚠️ Discord Client Warning:', info);
+    });
+
+    client.on('debug', info => {
+        console.log('🔧 Debug:', info);
+    });
+
+    client.on('shardError', error => {
+        console.error('\n❌ WEBSOCKET SHARD ERROR:');
+        console.error('Error:', error);
+        console.error('Error code:', error.code);
+        console.error('');
+    });
+
+    client.on('shardReady', (id) => {
+        console.log(`✅ Shard ${id} is ready and connected!`);
+    });
+
+    client.on('shardDisconnect', (event, id) => {
+        console.warn(`⚠️ Shard ${id} disconnected:`, event);
+    });
+
+    client.on('shardReconnecting', (id) => {
+        console.log(`🔄 Shard ${id} is reconnecting...`);
+    });
+
+    client.on('shardResume', (id) => {
+        console.log(`✅ Shard ${id} resumed connection`);
+    });
+
+    client.once('ready', async () => {
+        console.log('\n========================================');
+        console.log('🤖 DISCORD BOT READY');
+        console.log('========================================');
+        console.log('Bot User:', client.user.tag);
+        console.log('Bot ID:', client.user.id);
+        console.log('Connected to servers:', client.guilds.cache.size);
+        
+        if (client.guilds.cache.size === 0) {
+            console.warn('\n⚠️ WARNING: Bot is not in any Discord servers!');
+            console.warn('⚠️ Invite your bot using this URL:');
+            console.warn(`⚠️ https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&permissions=8&scope=bot%20applications.commands`);
+        } else {
+            console.log('\nServers:');
+            client.guilds.cache.forEach(guild => {
+                console.log(`  - ${guild.name} (${guild.id}) - ${guild.memberCount} members`);
+            });
+        }
+        console.log('========================================\n');
+
+        const rest = new REST({ version: '10' }).setToken(token);
+        try {
+            console.log('🔄 Registering slash commands...');
+            console.log(`   Commands to register: ${commands.length}`);
+            
+            const data = await rest.put(
+                Routes.applicationCommands(client.user.id),
+                { body: commands },
+            );
+            
+            console.log(`✅ Successfully registered ${data.length} application commands`);
+            data.forEach(cmd => {
+                console.log(`   - /${cmd.name}: ${cmd.description}`);
+            });
+        } catch (error) {
+            console.error('❌ Failed to register commands:');
+            console.error('Error:', error.message);
+            if (error.response) {
+                console.error('Response:', error.response.data);
+            }
+        }
+    });
+
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+
+        console.log(`\n📥 Command received: /${interaction.commandName} from ${interaction.user.tag} in ${interaction.guild?.name}`);
+
+        await interaction.deferReply();
+
+        try {
+            console.log(`🔍 Fetching config for guild: ${interaction.guildId}`);
+            const config = await Server.findOne({ discordGuildId: interaction.guildId });
+
+            if (!config || !config.robloxApiKey || !config.robloxUniverseId) {
+                console.warn('⚠️ Server not configured');
+                return interaction.editReply({ 
+                    content: '❌ **Setup Required:** This server is not connected to RobloxSync. Please configure it in the dashboard.' 
+                });
+            }
+
+            console.log('✅ Server config found');
+            console.log(`   Universe ID: ${config.robloxUniverseId}`);
+            console.log(`   Admin Role: ${config.adminRoleId || 'None set'}`);
+
+            if (config.adminRoleId) {
+                const hasRole = interaction.member.roles.cache.has(config.adminRoleId);
+                const isAdmin = interaction.member.permissions.has('Administrator');
+                
+                console.log(`🔐 Permission check:`);
+                console.log(`   Has admin role: ${hasRole}`);
+                console.log(`   Is administrator: ${isAdmin}`);
+                
+                if (!hasRole && !isAdmin) {
+                    console.warn('⛔ Permission denied');
+                    return interaction.editReply({ 
+                        content: `⛔ **Permission Denied:** You need the <@&${config.adminRoleId}> role or Administrator permission.` 
+                    });
+                }
+            }
+
+            console.log('✅ Permission check passed');
+
+            const apiKey = decrypt(config.robloxApiKey);
+            if (!apiKey) {
+                console.error('❌ API Key decryption failed');
+                return interaction.editReply({ 
+                    content: '❌ **Error:** API Key decryption failed. Please update settings in dashboard.' 
+                });
+            }
+
+            console.log('✅ API Key decrypted successfully');
+
+            const commandName = interaction.commandName;
+            const userId = interaction.options.getString('userid');
+            const reason = interaction.options.getString('reason') || 'No reason provided';
+            const message = interaction.options.getString('message');
+            const moderator = `${interaction.user.tag} (${interaction.user.id})`;
+
+            let payload = {};
+            let successMsg = '';
+
+            switch (commandName) {
+                case 'robloxban':
+                    payload = { action: 'ban', userId, reason, moderator };
+                    successMsg = `✅ **Banned** User \`${userId}\`\n**Reason:** ${reason}\n**Moderator:** ${interaction.user.tag}`;
+                    break;
+                
+                case 'robloxkick':
+                    payload = { action: 'kick', userId, reason, moderator };
+                    successMsg = `⚽ **Kicked** User \`${userId}\`\n**Reason:** ${reason}\n**Moderator:** ${interaction.user.tag}`;
+                    break;
+                
+                case 'robloxunban':
+                    payload = { action: 'unban', userId, moderator };
+                    successMsg = `🔓 **Unbanned** User \`${userId}\`\n**Moderator:** ${interaction.user.tag}`;
+                    break;
+                
+                case 'robloxannounce':
+                    payload = { action: 'announce', message, moderator };
+                    successMsg = `📢 **Announcement Sent**\n**Message:** "${message}"\n**Moderator:** ${interaction.user.tag}`;
+                    break;
+                
+                default:
+                    console.error('❌ Unknown command:', commandName);
+                    return interaction.editReply({ content: '❌ Unknown command' });
+            }
+
+            console.log('📤 Sending command to Roblox...');
+            await publishToRoblox(config.robloxUniverseId, apiKey, payload);
+
+            console.log('✅ Command executed successfully\n');
+            await interaction.editReply({ content: successMsg });
+
+        } catch (error) {
+            console.error('\n❌ COMMAND EXECUTION ERROR:');
+            console.error('Command:', interaction.commandName);
+            console.error('User:', interaction.user.tag);
+            console.error('Error:', error.message);
+            console.error('Stack:', error.stack);
+            console.error('');
+            
+            await interaction.editReply({ 
+                content: `❌ **Error:** ${error.message}` 
+            }).catch(err => {
+                console.error('Failed to send error message:', err);
+            });
+        }
+    });
+
+    console.log('🔄 Attempting to login to Discord...\n');
+    
+    try {
+        await client.login(token);
+        console.log('✅ Login method called successfully (waiting for READY event)');
+    } catch (err) {
+        console.error('\n========================================');
+        console.error('❌ FATAL: BOT LOGIN FAILED');
+        console.error('========================================');
+        console.error('Error code:', err.code);
+        console.error('Error message:', err.message);
+        console.error('Full error:', err.stack);
+        console.error('========================================\n');
+        throw err;
     }
 };
 
-app.get('/api/config', (req, res) => {
-    const botToken = process.env.DISCORD_BOT_TOKEN;
-    res.json({
-        clientId: process.env.DISCORD_CLIENT_ID,
-        redirectUri: process.env.DISCORD_REDIRECT_URI,
-        isBotConfigured: !!botToken && botToken !== 'YOUR_BOT_TOKEN_HERE' && botToken.length > 20
-    });
-});
-
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', time: new Date().toISOString() });
-});
-
-app.get('/api/auth/login', (req, res) => {
-    const { DISCORD_CLIENT_ID, DISCORD_REDIRECT_URI } = process.env;
-    const scopes = 'identify guilds';
-    const redirectUri = DISCORD_REDIRECT_URI || `https://${req.headers.host}/api/auth/discord/callback`;
-    const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}`;
-    res.redirect(url);
-});
-
-app.get('/api/auth/discord/callback', withDB(async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('No code provided');
-
-    try {
-        const redirectUri = process.env.DISCORD_REDIRECT_URI || `https://${req.headers.host}/api/auth/discord/callback`;
-
-        const params = new URLSearchParams({
-            client_id: process.env.DISCORD_CLIENT_ID,
-            client_secret: process.env.DISCORD_CLIENT_SECRET,
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: redirectUri
-        });
-
-        const tokenRes = await axios.post('https://discord.com/api/oauth2/token', params);
-        const { access_token, refresh_token } = tokenRes.data;
-
-        const userRes = await axios.get('https://discord.com/api/users/@me', {
-            headers: { Authorization: `Bearer ${access_token}` }
-        });
-
-        const { id, username, avatar } = userRes.data;
-        const avatarUrl = avatar ? `https://cdn.discordapp.com/avatars/${id}/${avatar}.png` : null;
-
-        await User.findOneAndUpdate(
-            { discordId: id },
-            { 
-                username, 
-                avatar: avatarUrl, 
-                accessToken: access_token, 
-                refreshToken: refresh_token, 
-                lastLogin: new Date() 
-            },
-            { upsert: true, new: true }
-        );
-
-        req.session.userId = id;
-        const frontendUrl = process.env.FRONTEND_URL || `https://${req.headers.host}`;
-        res.redirect(`${frontendUrl}/?dashboard=true`);
-    } catch (err) {
-        console.error('Auth Error:', err.response?.data || err.message);
-        res.redirect(`/?error=auth_failed`);
-    }
-}));
-
-app.get('/api/auth/logout', (req, res) => {
-    req.session = null;
-    res.status(200).json({ success: true });
-});
-
-app.get('/api/me', withDB(async (req, res) => {
-    if (!req.session || !req.session.userId) {
-        return res.status(401).json({ error: 'Not authenticated' });
-    }
-    const user = await User.findOne({ discordId: req.session.userId });
-    if (!user) return res.status(401).json({ error: 'User not found' });
-    res.json({ id: user.discordId, username: user.username, avatar: user.avatar });
-}));
-
-app.get('/api/servers', withDB(async (req, res) => {
-    if (!req.session || !req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
-    
-    try {
-        const user = await User.findOne({ discordId: req.session.userId });
-        if (!user) return res.status(401).json({ error: 'User record not found in database' });
-
-        // Fetch User Guilds
-        let userGuilds = [];
-        try {
-            const guildsRes = await axios.get('https://discord.com/api/users/@me/guilds', {
-                headers: { Authorization: `Bearer ${user.accessToken}` }
-            });
-            userGuilds = guildsRes.data || [];
-            console.log(`Successfully fetched ${userGuilds.length} guilds for user ${user.username}`);
-        } catch (e) {
-            console.error(`Failed to fetch user guilds for ${user.username}:`, e.response?.data || e.message);
-            // If token expired, we need to tell the user
-            if (e.response?.status === 401) {
-                return res.status(401).json({ error: 'Discord session expired. Please log out and log back in.' });
-            }
-            return res.status(500).json({ error: 'Failed to communicate with Discord API: ' + e.message });
-        }
-
-        // Fetch Bot Guilds to check presence
-        let botGuildIds = new Set();
-        const botToken = process.env.DISCORD_BOT_TOKEN;
-        
-        if (botToken && botToken !== 'YOUR_BOT_TOKEN_HERE' && botToken.length > 20) {
-            try {
-                const botGuildsRes = await axios.get('https://discord.com/api/users/@me/guilds', {
-                    headers: { Authorization: `Bot ${botToken}` }
-                });
-                if (Array.isArray(botGuildsRes.data)) {
-                    botGuildIds = new Set(botGuildsRes.data.map(g => g.id));
-                    console.log(`Bot is currently in ${botGuildIds.size} guilds.`);
-                }
-            } catch (botErr) {
-                console.error("Bot token error (Check Bot > Token in Developer Portal):", botErr.response?.data || botErr.message);
-            }
-        }
-
-        // 0x20 is MANAGE_GUILD permission. User must have this to manage the bot on that server.
-        const MANAGE_GUILD = 0x20n;
-        const adminGuilds = userGuilds.filter(g => {
-            try {
-                if (!g.permissions) return false;
-                // Some older guilds might have permissions as strings, some as numbers
-                const userPerms = BigInt(g.permissions);
-                return (userPerms & MANAGE_GUILD) === MANAGE_GUILD;
-            } catch (e) {
-                // Safeguard against BigInt errors or malformed data
-                console.warn(`Permission parsing error for guild ${g.id}:`, e.message);
-                return false;
-            }
-        });
-
-        console.log(`User has Manage Server permissions in ${adminGuilds.length} guilds.`);
-
-        const guildIds = adminGuilds.map(g => g.id);
-        const dbConfigs = await Server.find({ discordGuildId: { $in: guildIds } });
-        const configMap = {};
-        dbConfigs.forEach(conf => { configMap[conf.discordGuildId] = conf; });
-
-        const servers = adminGuilds.map(g => {
-            const conf = configMap[g.id];
-            const botInGuild = botGuildIds.has(g.id);
-            
-            // Safe decryption
-            let decryptedKey = '';
-            if (conf && conf.robloxApiKey) {
-                const result = decrypt(conf.robloxApiKey);
-                // If result is null, decryption failed (key mismatch), leave it empty
-                if (result) decryptedKey = result;
-            }
-
-            return {
-                id: g.id,
-                name: g.name,
-                icon: g.icon ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` : null,
-                connected: !!conf && !!conf.robloxApiKey && !!conf.robloxUniverseId,
-                botInGuild: botInGuild,
-                config: conf ? { 
-                    universeId: conf.robloxUniverseId || '', 
-                    adminRoleId: conf.adminRoleId || '', 
-                    apiKey: decryptedKey
-                } : null
-            };
-        });
-
-        // Sort: Bot in guild first, then linked first, then name
-        servers.sort((a, b) => {
-            if (a.botInGuild !== b.botInGuild) return a.botInGuild ? -1 : 1;
-            if (a.connected !== b.connected) return a.connected ? -1 : 1;
-            return a.name.localeCompare(b.name);
-        });
-        
-        res.json(servers);
-    } catch (err) {
-        // Log the actual error for Vercel/Console logs
-        console.error("Critical API Error in /api/servers:", err);
-        // Send actual error message to client for debugging
-        res.status(500).json({ error: 'Server Error: ' + err.message });
-    }
-}));
-
-app.post('/api/servers/:id/config', withDB(async (req, res) => {
-    if (!req.session || !req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
-    const { id } = req.params;
-    const { universeId, apiKey, adminRoleId } = req.body;
-    
-    try {
-        const encryptedKey = apiKey ? encrypt(apiKey) : '';
-        await Server.findOneAndUpdate(
-            { discordGuildId: id },
-            { 
-                ownerDiscordId: req.session.userId, 
-                robloxUniverseId: universeId, 
-                robloxApiKey: encryptedKey, 
-                adminRoleId: adminRoleId, 
-                updatedAt: new Date() 
-            },
-            { upsert: true, new: true }
-        );
-        res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to save config: ' + err.message });
-    }
-}));
-
-// Only run the server (and bot) if executed directly (e.g. node index.js)
-// This prevents the bot from starting in Vercel Serverless environment
-if (require.main === module) {
-    const PORT = process.env.PORT || 3001;
-    
-    // Start Express Server
-    app.listen(PORT, async () => {
-        console.log(`🚀 Backend running on port ${PORT}`);
-        
-        // Ensure DB is connected before starting bot
-        try {
-            await connectDB();
-            console.log("✅ Database Connected");
-            
-            // Start the Bot
-            console.log("🔄 Starting Discord Bot...");
-            await startBot();
-        } catch (e) {
-            console.error("❌ Failed to initialize backend resources:", e);
-        }
-    });
-}
-
-module.exports = app;
+module.exports = { startBot };
