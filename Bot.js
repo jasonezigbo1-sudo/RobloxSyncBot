@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const axios = require('axios');
-const Server = require('./server/models/Server'); // ✅ FIXED
-const { decrypt } = require('./server/utils/crypto'); // ✅ FIXED
+const Server = require('./server/models/Server');
+const { decrypt } = require('./server/utils/crypto');
 
 // Commands Definition
 const commands = [
@@ -57,11 +57,19 @@ async function publishToRoblox(universeId, apiKey, payload) {
 const startBot = async () => {
     const token = process.env.DISCORD_BOT_TOKEN;
     
+    // Debug logging
+    console.log('🔍 Bot Token Check:');
+    console.log('- Token exists:', !!token);
+    console.log('- Token length:', token ? token.length : 0);
+    console.log('- Token valid:', token && token !== 'YOUR_BOT_TOKEN_HERE' && token.length > 20);
+    
     if (!token || token === 'YOUR_BOT_TOKEN_HERE' || token.length < 20) {
-        console.warn("⚠️  Discord Bot Token not configured. Bot will not start.");
+        console.error("❌ Discord Bot Token not configured. Bot will not start.");
+        console.error("❌ Please set DISCORD_BOT_TOKEN in Render environment variables.");
         return;
     }
 
+    console.log('✅ Bot token validated, creating Discord client...');
     const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
     client.once('ready', async () => {
@@ -99,7 +107,6 @@ const startBot = async () => {
             // 2. Check Permissions (Admin Role)
             if (config.adminRoleId) {
                 const hasRole = interaction.member.roles.cache.has(config.adminRoleId);
-                // Check for Administrator permission as fallback
                 const isAdmin = interaction.member.permissions.has('Administrator');
                 
                 if (!hasRole && !isAdmin) {
@@ -151,10 +158,12 @@ const startBot = async () => {
         }
     });
 
+    console.log('🔄 Attempting to login to Discord...');
     try {
         await client.login(token);
     } catch (err) {
-        console.error("Failed to login bot:", err.message);
+        console.error("❌ Failed to login bot:", err.message);
+        throw err;
     }
 };
 
